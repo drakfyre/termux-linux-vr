@@ -390,6 +390,8 @@ termux-x11 :0 -ac &
 sleep 3
 export DISPLAY=:0
 
+am start -n com.termux.x11/.MainActivity
+
 echo "-----------------------------------------------"
 echo "  [*] Open Termux-X11 app to view desktop!"
 echo "-----------------------------------------------"
