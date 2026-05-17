@@ -1,0 +1,21 @@
+export PATH="$PATH:~/bin"
+export PATH="~/jazzyview:$PATH"
+
+# Function to send the title escape sequence
+set_terminal_title() {
+    printf "\033]0;%s\007" "$1"
+}
+
+# Run BEFORE any command executes: sets title to the running program name
+show_command_title() {
+    # Extract the first word of the command being run
+    local cmd_name
+    cmd_name=$(echo "$BASH_COMMAND" | awk '{print $1}')
+    set_terminal_title "$cmd_name"
+}
+
+bannerfiles=(~/Banners/*)
+cat "${files[$((RANDOM % ${#bannerfiles[@]}))]}"
+
+# Bind the functions to Bash execution states
+trap 'show_command_title' DEBUG

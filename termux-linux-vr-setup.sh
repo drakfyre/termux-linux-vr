@@ -1,6 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
+
 #######################################################
-#  Termux Linux Setup Script
+#  Termux Linux VR Setup Script
 #  
 #  Features:
 #  - Choice of Desktop Environment (XFCE, LXQt, MATE, KDE)
@@ -8,6 +9,8 @@
 #  - Productivity and Media tools (VLC, Firefox)
 #  - Python & Web Dev environment pre-installed
 #  - Windows App Support (Wine/Hangover)
+#  - Termux:X11 autolaunch
+#  - Special edition banners :>
 #######################################################
 
 # ============== CONFIGURATION ==============
@@ -84,6 +87,7 @@ install_pkg() {
 show_banner() {
     clear
     echo -e "${CYAN}"
+    cat Banners/Quest.txt
     cat << 'BANNER'
     -------------------------------------------
                                                
@@ -326,28 +330,15 @@ EOF
     else
         echo -e "$XDG_INJECT" >> ~/.config/linux-gpu.sh
     fi
-    
-    # Create Plank autostart if XFCE or MATE
-    if [ "$DE_CHOICE" == "1" ] || [ "$DE_CHOICE" == "3" ]; then
-        mkdir -p ~/.config/autostart
-        cat > ~/.config/autostart/plank.desktop << 'PLANKEOF'
-[Desktop Entry]
-Type=Application
-Exec=plank
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-Name=Plank
-PLANKEOF
-    else
-        rm -f ~/.config/autostart/plank.desktop 2>/dev/null
-    fi
+
+    # No plank
+    rm -f ~/.config/autostart/plank.desktop 2>/dev/null
 
     # Determine execution commands and kill commands based on DE
     case $DE_CHOICE in
         1)
             EXEC_CMD="exec startxfce4"
-            KILL_CMD="pkill -9 xfce4-session; pkill -9 plank"
+            KILL_CMD="pkill -9 xfce4-session"
             ;;
         2)
             EXEC_CMD="exec startlxqt"
@@ -355,7 +346,7 @@ PLANKEOF
             ;;
         3)
             EXEC_CMD="exec mate-session"
-            KILL_CMD="pkill -9 mate-session; pkill -9 plank"
+            KILL_CMD="pkill -9 mate-session"
             ;;
         4)
             EXEC_CMD="(sleep 5 && pkill -9 plasmashell && plasmashell) > /dev/null 2>&1 &\nexec startplasma-x11"
@@ -393,7 +384,7 @@ export DISPLAY=:0
 am start -n com.termux.x11/.MainActivity
 
 echo "-----------------------------------------------"
-echo "  [*] Open Termux-X11 app to view desktop!"
+echo "  [*] Install Termux-X11 app to view desktop!"
 echo "-----------------------------------------------"
 echo ""
 ${EXEC_CMD}
@@ -468,6 +459,13 @@ EOF
     echo -e "  [+] Added Firefox, VLC, Wine, and Terminal shortcuts."
 }
 
+# ============== STEP 12: COPY BANNERS ==============
+step_banners() {
+    cp -r Banners ~/Banners
+    cp -f BannerBash.txt ~/.bashrc
+    
+}
+
 # ============== COMPLETION ==============
 show_completion() {
     echo ""
@@ -509,6 +507,7 @@ main() {
     step_wine
     step_launchers
     step_shortcuts
+    step_banners
     
     show_completion
 }
