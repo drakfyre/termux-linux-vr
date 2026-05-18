@@ -422,8 +422,6 @@ Icon=firefox
 Type=Application
 EOF
 
-
-
     cat > ~/Desktop/VLC.desktop << 'EOF'
 [Desktop Entry]
 Name=VLC Media Player
@@ -459,11 +457,15 @@ EOF
     echo -e "  [+] Added Firefox, VLC, Wine, and Terminal shortcuts."
 }
 
-# ============== STEP 12: COPY BANNERS ==============
-step_banners() {
+# ============== STEP 12: COPY BANNERS AND AUTOSTART ==============
+step_banners()
+{
     cp -r Banners ~/Banners
     cp -f BannerBash.txt ~/.bashrc
     
+    cat > ~/.profile << 'EOF'
+~/start-linux.sh
+EOF
 }
 
 # ============== COMPLETION ==============
