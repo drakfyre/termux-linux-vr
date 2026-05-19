@@ -17,5 +17,5 @@ Before running this script, you must install the correct versions of the require
 Once you have both applications installed on your phone, open the primary **Termux** app and paste the following command to automatically download and run the setup script:
 
 ```bash
-curl -O https://raw.githubusercontent.com/drakfyre/termux-linux-vr/main/termux-linux-setup.sh && chmod +x termux-linux-vr-setup.sh && ./termux-linux-vr-setup.sh
+curl -O https://raw.githubusercontent.com/drakfyre/termux-linux-vr/main/termux-linux-vr-setup.sh && ./termux-linux-vr-setup.sh
 ```
