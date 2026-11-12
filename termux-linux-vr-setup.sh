@@ -5,8 +5,10 @@
 #  
 #  Features:
 #  - Choice of Desktop Environment (XFCE, LXQt, MATE, KDE)
-#  - Smart GPU acceleration detection (Turnip/Zink)
-#  - Productivity and Media tools (VLC, Firefox)
+#  - Smart GPU acceleration detection
+#      Quest / Horizon OS: VirGL (Adreno via Android's GLES driver)
+#      Other Adreno phones: Turnip/Zink
+#  - Productivity and Media tools (VLC, Chromium)
 #  - Python & Web Dev environment pre-installed
 #  - Windows App Support (Wine/Hangover)
 #  - Termux:X11 autolaunch
@@ -108,12 +110,19 @@ setup_environment() {
     DEVICE_BRAND=$(getprop ro.product.brand 2>/dev/null || echo "Unknown")
     ANDROID_VERSION=$(getprop ro.build.version.release 2>/dev/null || echo "Unknown")
     CPU_ABI=$(getprop ro.product.cpu.abi 2>/dev/null || echo "arm64-v8a")
+    DEVICE_MANUFACTURER=$(getprop ro.product.manufacturer 2>/dev/null || echo "Unknown")
     GPU_VENDOR=$(getprop ro.hardware.egl 2>/dev/null || echo "")
     
     echo -e "  [*] Device: ${WHITE}${DEVICE_BRAND} ${DEVICE_MODEL}${NC}"
     echo -e "  [*] Android: ${WHITE}${ANDROID_VERSION}${NC}"
     
-    if [[ "$GPU_VENDOR" == *"adreno"* ]] || [[ "$DEVICE_BRAND" == *"samsung"* ]] || [[ "$DEVICE_BRAND" == *"Samsung"* ]] || [[ "$DEVICE_BRAND" == *"oneplus"* ]] || [[ "$DEVICE_BRAND" == *"xiaomi"* ]]; then
+    # Quest headsets (Horizon OS) block the KGSL GPU memory allocation that
+    # Turnip needs, so Turnip/Zink can't work there. VirGL forwards OpenGL to
+    # Android's own Adreno driver instead: GLES 3.2 / desktop GL 2.1.
+    if [[ "${DEVICE_MANUFACTURER,,}" == "oculus" ]] || [[ "${DEVICE_MANUFACTURER,,}" == "meta" ]] || [[ "${DEVICE_BRAND,,}" == "oculus" ]] || [[ "$DEVICE_MODEL" == *"Quest"* ]]; then
+        GPU_DRIVER="virgl"
+        echo -e "  [*] GPU: ${WHITE}Adreno (Meta Quest) - VirGL Hardware Acceleration${NC}"
+    elif [[ "$GPU_VENDOR" == *"adreno"* ]] || [[ "$DEVICE_BRAND" == *"samsung"* ]] || [[ "$DEVICE_BRAND" == *"Samsung"* ]] || [[ "$DEVICE_BRAND" == *"oneplus"* ]] || [[ "$DEVICE_BRAND" == *"xiaomi"* ]]; then
         GPU_DRIVER="freedreno"
         echo -e "  [*] GPU: ${WHITE}Adreno (Qualcomm) - Hardware Acceleration Supported${NC}"
     else
@@ -169,7 +178,7 @@ step_repos() {
     echo -e "${PURPLE}[Step ${CURRENT_STEP}/${TOTAL_STEPS}] Adding package repositories...${NC}"
     echo ""
     install_pkg "x11-repo" "X11 Repository"
-    install_pkg "tur-repo" "TUR Repository (Firefox)"
+    install_pkg "tur-repo" "TUR Repository"
 }
 
 # ============== STEP 3: INSTALL TERMUX-X11 ==============
@@ -220,11 +229,20 @@ step_gpu() {
     update_progress
     echo -e "${PURPLE}[Step ${CURRENT_STEP}/${TOTAL_STEPS}] Installing GPU Acceleration...${NC}"
     echo ""
-    install_pkg "mesa-zink" "Mesa Zink Core"
-    if [ "$GPU_DRIVER" == "freedreno" ]; then
-        install_pkg "mesa-vulkan-icd-freedreno" "Turnip Adreno Driver"
+    if [ "$GPU_DRIVER" == "virgl" ]; then
+        # Needs the current Termux "mesa" (26.x). The old "mesa-zink" (22.x)
+        # crashes with "stack corruption" under VirGL; installing "mesa"
+        # replaces it automatically (the two packages conflict).
+        install_pkg "mesa" "Mesa OpenGL"
+        install_pkg "virglrenderer-android" "VirGL Renderer (Android GLES bridge)"
+    else
+        install_pkg "mesa-zink" "Mesa Zink Core"
+        if [ "$GPU_DRIVER" == "freedreno" ]; then
+            install_pkg "mesa-vulkan-icd-freedreno" "Turnip Adreno Driver"
+        fi
+        install_pkg "vulkan-loader-android" "Vulkan Loader"
     fi
-    install_pkg "vulkan-loader-android" "Vulkan Loader"
+    install_pkg "mesa-demos" "Mesa Demos (glxinfo, glxgears)"
 }
 
 # ============== STEP 6: INSTALL AUDIO ==============
@@ -240,7 +258,9 @@ step_apps() {
     update_progress
     echo -e "${PURPLE}[Step ${CURRENT_STEP}/${TOTAL_STEPS}] Installing Media & Dev Apps...${NC}"
     echo ""
-    install_pkg "firefox" "Firefox Browser"
+    # Chromium uses the GPU with no extra flags: it falls back to ANGLE on
+    # top of the desktop's GL driver, so WebGL/WebGPU run on the GPU.
+    install_pkg "chromium" "Chromium Browser"
     install_pkg "vlc" "VLC Media Player"
     install_pkg "git" "Git Version Control"
     install_pkg "wget" "Wget Downloader"
@@ -314,6 +334,20 @@ step_launchers() {
     fi
     
     # GPU & Environment Config
+    if [ "$GPU_DRIVER" == "virgl" ]; then
+    cat > ~/.config/linux-gpu.sh << 'EOF'
+# GPU acceleration for the Termux:X11 desktop on Meta Quest, via VirGL.
+# Turnip/Zink can't work here: Horizon OS blocks KGSL GPU memory allocation.
+# VirGL forwards GL to Android's own Adreno driver: GLES 3.2 / desktop GL 2.1.
+# Check it with: glxinfo -B | grep renderer   (should say "virgl (Adreno ...)")
+if ! pgrep -f '^virgl_test_server_android' >/dev/null 2>&1; then
+  virgl_test_server_android >"${TMPDIR:-/data/data/com.termux/files/usr/tmp}/virgl.log" 2>&1 &
+  sleep 1
+fi
+export GALLIUM_DRIVER=virpipe
+unset MESA_LOADER_DRIVER_OVERRIDE
+EOF
+    else
     cat > ~/.config/linux-gpu.sh << EOF
 export MESA_NO_ERROR=1
 export MESA_GL_VERSION_OVERRIDE=4.6
@@ -324,6 +358,7 @@ export TU_DEBUG=noconform
 export MESA_VK_WSI_PRESENT_MODE=immediate
 export ZINK_DESCRIPTORS=lazy
 EOF
+    fi
 
     if [ "$DE_CHOICE" == "4" ]; then
         echo "export KWIN_COMPOSE=O2ES" >> ~/.config/linux-gpu.sh
@@ -366,9 +401,12 @@ echo "[*] Cleaning up old sessions..."
 pkill -9 -f "termux.x11" 2>/dev/null
 ${KILL_CMD} 2>/dev/null
 pkill -9 -f "dbus" 2>/dev/null
+# A stale X lock survives a device reboot and blocks the desktop from starting
+rm -f "\$PREFIX/tmp/.X0-lock" "\$PREFIX/tmp/.X11-unix/X0"
 
 unset PULSE_SERVER
 pulseaudio --kill 2>/dev/null
+rm -f "\$PREFIX"/tmp/pulse-*/pid   # stale after a reboot; makes pulseaudio think it is running
 sleep 0.5
 echo "[*] Starting audio server..."
 pulseaudio --start --exit-idle-time=-1
@@ -400,6 +438,7 @@ pkill -9 -f "termux.x11" 2>/dev/null
 pkill -9 -f "pulseaudio" 2>/dev/null
 ${KILL_CMD} 2>/dev/null
 pkill -9 -f "dbus" 2>/dev/null
+pkill -f "^virgl_test_server_android" 2>/dev/null
 echo "Desktop stopped."
 STOPEOF
     chmod +x ~/stop-linux.sh
@@ -414,11 +453,11 @@ step_shortcuts() {
     mkdir -p ~/Desktop
     
     # App shortcuts
-    cat > ~/Desktop/Firefox.desktop << 'EOF'
+    cat > ~/Desktop/Chromium.desktop << 'EOF'
 [Desktop Entry]
-Name=Firefox
-Exec=firefox
-Icon=firefox
+Name=Chromium
+Exec=chromium-browser %U
+Icon=chromium
 Type=Application
 EOF
 
@@ -454,7 +493,21 @@ Type=Application
 EOF
 
     chmod +x ~/Desktop/*.desktop 2>/dev/null
-    echo -e "  [+] Added Firefox, VLC, Wine, and Terminal shortcuts."
+    echo -e "  [+] Added Chromium, VLC, Wine, and Terminal shortcuts."
+
+    # Make Chromium the default web browser
+    if command -v xdg-mime > /dev/null 2>&1; then
+        for mt in x-scheme-handler/http x-scheme-handler/https text/html application/xhtml+xml; do
+            xdg-mime default chromium.desktop "$mt" > /dev/null 2>&1
+        done
+    fi
+    if [ "$DE_CHOICE" == "1" ]; then
+        mkdir -p ~/.config/xfce4
+        touch ~/.config/xfce4/helpers.rc
+        sed -i '/^WebBrowser=/d' ~/.config/xfce4/helpers.rc
+        echo "WebBrowser=chromium" >> ~/.config/xfce4/helpers.rc
+    fi
+    echo -e "  [+] Set Chromium as the default browser."
 }
 
 # ============== STEP 12: COPY BANNERS AND AUTOSTART ==============
@@ -463,8 +516,12 @@ step_banners()
     cp -r Banners ~/Banners
     cp -f BannerBash.txt ~/.bashrc
     
+    # Only auto-start the desktop in real interactive terminals, not in
+    # scripts or tool shells (e.g. Claude Code), which would otherwise hang.
     cat > ~/.profile << 'EOF'
-~/start-linux.sh
+if [ -z "$CLAUDECODE" ] && [[ $- == *i* ]]; then
+  ~/start-linux.sh
+fi
 EOF
 }
 
@@ -482,9 +539,13 @@ COMPLETE
     echo -e "${WHITE}[*] Your ${DE_NAME} environment is ready.${NC}"
     echo -e "${CYAN}[*] Installed Software:${NC}"
     echo "    - Python (Flask Demo located in ~/demo_python)"
-    echo "    - Firefox Browser & VLC Media Player"
+    echo "    - Chromium Browser & VLC Media Player"
     echo "    - Wine & Hangover (Windows PC App compatibility)"
-    echo "    - GPU Hardware Acceleration Enabled"
+    if [ "$GPU_DRIVER" == "virgl" ]; then
+        echo "    - GPU Hardware Acceleration Enabled (VirGL -> Adreno, GLES 3.2)"
+    else
+        echo "    - GPU Hardware Acceleration Enabled (Zink)"
+    fi
     echo ""
     echo -e "${YELLOW}------------------------------------------------------------${NC}"
     echo -e "${WHITE}[*] TO START THE DESKTOP:${NC}  ${GREEN}./start-linux.sh${NC}"

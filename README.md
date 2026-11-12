@@ -1,6 +1,15 @@
 # termux-linux-setup
 
-A unified script to easily set up native Linux desktop environments (XFCE4, LXQt, MATE, KDE) on Android via Termux. Includes GPU acceleration (Turnip/Zink), audio, Windows app support (Box64/Wine), and a comprehensive set of default tools.
+A unified script to easily set up native Linux desktop environments (XFCE4, LXQt, MATE, KDE) on Android via Termux. Includes GPU acceleration, audio, Windows app support (Box64/Wine), the Chromium browser, and a comprehensive set of default tools.
+
+## GPU acceleration
+
+* **Meta Quest (Horizon OS):** uses VirGL, which forwards OpenGL to the headset's own Adreno driver (OpenGL ES 3.2, desktop OpenGL 2.1). Turnip/Zink can't work on Quest because Horizon OS blocks the GPU memory allocation Turnip needs. The VirGL server starts automatically with the desktop. Apps that can use OpenGL ES (Chromium, Godot's Compatibility renderer) get the most out of it.
+* **Other Adreno phones:** Turnip + Zink (Vulkan).
+
+Check it from a desktop terminal with `glxinfo -B | grep renderer`. On Quest it should say `virgl (Adreno ...)`.
+
+Chromium needs no extra flags: it uses ANGLE on top of the GPU driver, so WebGL and WebGPU run on the GPU. Video decoding is software-only (no hardware decode is available).
 
 ## Prerequisites
 
