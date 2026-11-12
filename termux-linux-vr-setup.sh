@@ -12,11 +12,15 @@
 #  - Python & Web Dev environment pre-installed
 #  - Windows App Support (Wine/Hangover)
 #  - Termux:X11 autolaunch
+#  - Quest: optional bigger Termux:X11 window (patched on-device)
 #  - Special edition banners :>
 #######################################################
 
 # ============== CONFIGURATION ==============
-TOTAL_STEPS=12
+TOTAL_STEPS=13
+PATCH_X11="no"
+X11_WIDTH=1440
+X11_HEIGHT=1000
 REPO_TARBALL="https://github.com/drakfyre/termux-linux-vr/archive/refs/heads/main.tar.gz"
 ASSET_DIR=""
 CURRENT_STEP=0
@@ -89,7 +93,7 @@ install_pkg() {
 
 # ============== EXTRA FILES (BANNERS) ==============
 # The one-line install only downloads this script, so fetch the rest of the
-# repo (Banners/, BannerBash.txt) from GitHub when it isn't next to us.
+# repo (Banners/, BannerBash.txt, tools/) from GitHub when it isn't next to us.
 find_assets() {
     local script_dir
     script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -106,7 +110,7 @@ find_assets() {
         ASSET_DIR="$tmp"
         return 0
     fi
-    echo -e "${YELLOW}[!] Couldn't download the banner files; skipping banners.${NC}"
+    echo -e "${YELLOW}[!] Couldn't download the repo's extra files; skipping banners and the X11 window patch.${NC}"
     return 1
 }
 
@@ -183,6 +187,20 @@ setup_environment() {
     esac
     
     echo -e "\n${GREEN}[+] Selected: ${DE_NAME}.${NC}"
+
+    if [ "$GPU_DRIVER" == "virgl" ]; then
+        echo ""
+        echo -e "${CYAN}Make the Termux:X11 desktop window bigger?${NC}"
+        echo -e "  Horizon OS opens Termux:X11 at 1024x640. This patches the app to open at"
+        echo -e "  ${X11_WIDTH}x${X11_HEIGHT} instead. It rebuilds the app on this headset and re-signs it,"
+        echo -e "  so near the end you'll be asked to uninstall the official app and install"
+        echo -e "  the patched one (two Android dialogs)."
+        read -p "Patch Termux:X11? (Y/n) [default: Y]: " PATCH_INPUT
+        if [[ "${PATCH_INPUT:-y}" =~ ^[Yy] ]]; then
+            PATCH_X11="yes"
+            echo -e "${GREEN}[+] Termux:X11 will be patched.${NC}"
+        fi
+    fi
     sleep 2
 }
 
@@ -340,7 +358,93 @@ step_wine() {
     ln -sf /data/data/com.termux/files/usr/opt/hangover-wine/bin/winecfg /data/data/com.termux/files/usr/bin/winecfg
 }
 
-# ============== STEP 10: CREATE LAUNCHERS ==============
+# ============== STEP 10: QUEST TERMUX:X11 WINDOW SIZE ==============
+x11_apk_path() {
+    pm path com.termux.x11 2>/dev/null | sed -n 's/^package://p' | head -1
+}
+
+x11_is_patched() {
+    local apk
+    apk=$(x11_apk_path)
+    [ -n "$apk" ] && aapt dump xmltree "$apk" AndroidManifest.xml 2>/dev/null | grep -q 'E: layout'
+}
+
+step_x11_patch() {
+    update_progress
+    echo -e "${PURPLE}[Step ${CURRENT_STEP}/${TOTAL_STEPS}] Termux:X11 Window Size (Quest)...${NC}"
+    echo ""
+    if [ "$PATCH_X11" != "yes" ]; then
+        echo -e "  [*] Skipped."
+        return 0
+    fi
+    if [ -z "$ASSET_DIR" ] || [ ! -f "$ASSET_DIR/tools/patch-termux-x11.sh" ]; then
+        echo -e "  [-] Patch tools not available ${RED}(skipped)${NC}"
+        return 0
+    fi
+
+    # The patcher stays in ~/bin so it can be re-run after Termux:X11 updates.
+    # termux-x11-patched starts X without the signature check the re-signed
+    # app fails (it also works with the official app).
+    mkdir -p ~/bin
+    cp -f "$ASSET_DIR/tools/patch-termux-x11.sh" ~/bin/patch-termux-x11
+    cp -f "$ASSET_DIR/tools/termux-x11-patched" ~/bin/termux-x11-patched
+    chmod +x ~/bin/patch-termux-x11 ~/bin/termux-x11-patched
+    echo -e "  [+] Installed ~/bin/patch-termux-x11 and ~/bin/termux-x11-patched"
+
+    install_pkg "openjdk-21" "Java (OpenJDK 21)"
+    install_pkg "apktool" "Apktool"
+    install_pkg "aapt" "Android Asset Packaging Tool"
+    install_pkg "apksigner" "APK Signer"
+
+    if [ -z "$(x11_apk_path)" ]; then
+        echo -e "${YELLOW}  [!] The Termux:X11 app isn't installed. Install it, then run:${NC}"
+        echo -e "      ${WHITE}patch-termux-x11${NC}  (and install the APK it makes)"
+        return 0
+    fi
+    if x11_is_patched; then
+        echo -e "  [+] Termux:X11 is already patched."
+        return 0
+    fi
+
+    local out="$HOME/termux-x11-quest-maxsize.apk"
+    [ -w /sdcard/Download ] && out="/sdcard/Download/termux-x11-quest-maxsize.apk"
+    local log="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/x11patch.log"
+    (PATCH_OUT="$out" ~/bin/patch-termux-x11 "$X11_WIDTH" "$X11_HEIGHT" > "$log" 2>&1) &
+    if ! spinner $! "Building patched Termux:X11 (${X11_WIDTH}x${X11_HEIGHT})..."; then
+        echo -e "${YELLOW}  [!] Patching failed. Details: ${log}${NC}"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}  The patched app has a different signature, so the official one has to go first.${NC}"
+    read -p "  Press Enter to open the uninstall dialog for Termux:X11..." _
+    am start -a android.intent.action.DELETE -d package:com.termux.x11 > /dev/null 2>&1
+    read -p "  Press Enter once it's uninstalled..." _
+    if [ -n "$(x11_apk_path)" ]; then
+        # Android can ignore the uninstall dialog request from Termux, so fall
+        # back to the app's settings page, which has an Uninstall button.
+        echo -e "${YELLOW}  [!] Termux:X11 is still installed. Opening its app settings; tap Uninstall there.${NC}"
+        am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:com.termux.x11 > /dev/null 2>&1
+        read -p "  Press Enter once it's uninstalled..." _
+    fi
+    if [ -n "$(x11_apk_path)" ]; then
+        echo -e "${YELLOW}  [!] Termux:X11 is still installed, so the patched app can't be installed yet.${NC}"
+        echo -e "      Uninstall it (App Library > ... > Uninstall), then install: ${WHITE}${out}${NC}"
+        return 0
+    fi
+
+    echo -e "${CYAN}  Now install the patched app. If asked, allow Termux to install apps.${NC}"
+    termux-open "$out" > /dev/null 2>&1
+    read -p "  Press Enter once it's installed..." _
+    if x11_is_patched; then
+        echo -e "  [+] Patched Termux:X11 installed. It opens at ${X11_WIDTH}x${X11_HEIGHT}."
+    else
+        echo -e "${YELLOW}  [!] The patched app isn't installed yet. Install it from: ${WHITE}${out}${NC}"
+    fi
+    echo -e "  [*] After a Termux:X11 update, run ${WHITE}patch-termux-x11${NC} again."
+}
+
+# ============== STEP 11: CREATE LAUNCHERS ==============
 step_launchers() {
     update_progress
     echo -e "${PURPLE}[Step ${CURRENT_STEP}/${TOTAL_STEPS}] Configuring Startup Scripts...${NC}"
@@ -440,7 +544,13 @@ pactl load-module module-native-protocol-tcp auth-ip-acl=127.0.0.1 auth-anonymou
 export PULSE_SERVER=127.0.0.1
 
 echo "[*] Starting X11 server..."
-termux-x11 :0 -ac &
+# termux-x11-patched (installed by the Quest window patch) skips the signature
+# check that the re-signed Termux:X11 fails. It works with the official app too.
+if [ -x ~/bin/termux-x11-patched ]; then
+    ~/bin/termux-x11-patched :0 -ac &
+else
+    termux-x11 :0 -ac &
+fi
 sleep 3
 export DISPLAY=:0
 
@@ -470,7 +580,7 @@ STOPEOF
     echo -e "  [+] Created ~/stop-linux.sh"
 }
 
-# ============== STEP 11: CREATE SHORTCUTS ==============
+# ============== STEP 12: CREATE SHORTCUTS ==============
 step_shortcuts() {
     update_progress
     echo -e "${PURPLE}[Step ${CURRENT_STEP}/${TOTAL_STEPS}] Creating Desktop Shortcuts...${NC}"
@@ -535,7 +645,7 @@ EOF
     echo -e "  [+] Set Chromium as the default browser."
 }
 
-# ============== STEP 12: COPY BANNERS AND AUTOSTART ==============
+# ============== STEP 13: COPY BANNERS AND AUTOSTART ==============
 step_banners()
 {
     update_progress
@@ -575,6 +685,9 @@ COMPLETE
     echo "    - Python (Flask Demo located in ~/demo_python)"
     echo "    - Chromium Browser & VLC Media Player"
     echo "    - Wine & Hangover (Windows PC App compatibility)"
+    if [ "$PATCH_X11" == "yes" ]; then
+        echo "    - Bigger Termux:X11 window (re-run patch-termux-x11 after X11 updates)"
+    fi
     if [ "$GPU_DRIVER" == "virgl" ]; then
         echo "    - GPU Hardware Acceleration Enabled (VirGL -> Adreno, GLES 3.2)"
     else
@@ -603,6 +716,7 @@ main() {
     step_apps
     step_python
     step_wine
+    step_x11_patch
     step_launchers
     step_shortcuts
     step_banners

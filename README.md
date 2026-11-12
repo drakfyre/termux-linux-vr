@@ -11,6 +11,14 @@ Check it from a desktop terminal with `glxinfo -B | grep renderer`. On Quest it 
 
 Chromium needs no extra flags: it uses ANGLE on top of the GPU driver, so WebGL and WebGPU run on the GPU. Video decoding is software-only (no hardware decode is available).
 
+## Bigger Termux:X11 window on Quest
+
+Horizon OS opens Termux:X11 in a small 1024x640 panel. On a Quest, the setup script offers to patch the app so it opens at 1440x1000 instead. It rebuilds your installed Termux:X11 on the headset (with apktool) and re-signs it with a key made just for you (`~/.android-patch-key.jks`). Near the end you'll be asked to uninstall the official app and install the patched one.
+
+* After a Termux:X11 update, run `patch-termux-x11` again (or `patch-termux-x11 WIDTH HEIGHT` for a different size) and install the APK it makes. It installs over the old one.
+* Keep `~/.android-patch-key.jks`. If you lose it, you'll have to uninstall Termux:X11 before installing a newly patched build.
+* `~/start-linux.sh` starts X with `~/bin/termux-x11-patched`, because the stock `termux-x11` command rejects the re-signed app.
+
 ## Prerequisites
 
 Before running this script, you must install the correct versions of the required applications on your Android device.
