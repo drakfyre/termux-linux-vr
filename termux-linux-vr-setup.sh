@@ -16,7 +16,9 @@
 #######################################################
 
 # ============== CONFIGURATION ==============
-TOTAL_STEPS=11
+TOTAL_STEPS=12
+REPO_TARBALL="https://github.com/drakfyre/termux-linux-vr/archive/refs/heads/main.tar.gz"
+ASSET_DIR=""
 CURRENT_STEP=0
 DE_CHOICE="1"
 DE_NAME="XFCE4"
@@ -85,11 +87,34 @@ install_pkg() {
     spinner $! "Installing ${name}..."
 }
 
+# ============== EXTRA FILES (BANNERS) ==============
+# The one-line install only downloads this script, so fetch the rest of the
+# repo (Banners/, BannerBash.txt) from GitHub when it isn't next to us.
+find_assets() {
+    local script_dir
+    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    for dir in "$script_dir" "$PWD"; do
+        if [ -f "$dir/BannerBash.txt" ] && [ -d "$dir/Banners" ]; then
+            ASSET_DIR="$dir"
+            return 0
+        fi
+    done
+    local tmp="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/termux-linux-vr-assets"
+    rm -rf "$tmp" && mkdir -p "$tmp"
+    if curl -fsSL "$REPO_TARBALL" | tar -xz -C "$tmp" --strip-components=1 2>/dev/null \
+        && [ -f "$tmp/BannerBash.txt" ] && [ -d "$tmp/Banners" ]; then
+        ASSET_DIR="$tmp"
+        return 0
+    fi
+    echo -e "${YELLOW}[!] Couldn't download the banner files; skipping banners.${NC}"
+    return 1
+}
+
 # ============== BANNER ==============
 show_banner() {
     clear
     echo -e "${CYAN}"
-    cat Banners/Quest.txt
+    [ -n "$ASSET_DIR" ] && cat "$ASSET_DIR/Banners/Quest.txt"
     cat << 'BANNER'
     -------------------------------------------
                                                
@@ -513,8 +538,17 @@ EOF
 # ============== STEP 12: COPY BANNERS AND AUTOSTART ==============
 step_banners()
 {
-    cp -r Banners ~/Banners
-    cp -f BannerBash.txt ~/.bashrc
+    update_progress
+    echo -e "${PURPLE}[Step ${CURRENT_STEP}/${TOTAL_STEPS}] Installing Banners & Autostart...${NC}"
+    echo ""
+    if [ -n "$ASSET_DIR" ]; then
+        mkdir -p ~/Banners
+        cp -r "$ASSET_DIR/Banners/." ~/Banners/
+        cp -f "$ASSET_DIR/BannerBash.txt" ~/.bashrc
+        echo -e "  [+] Installed terminal banners and ~/.bashrc"
+    else
+        echo -e "  [-] Banner files not available ${RED}(skipped)${NC}"
+    fi
     
     # Only auto-start the desktop in real interactive terminals, not in
     # scripts or tool shells (e.g. Claude Code), which would otherwise hang.
@@ -556,6 +590,7 @@ COMPLETE
 
 # ============== MAIN ==============
 main() {
+    find_assets
     show_banner
     setup_environment
     
